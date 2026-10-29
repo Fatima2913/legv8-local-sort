@@ -1,0 +1,450 @@
+// Name: Fatima Qureshi
+// NetID: fatimaq
+
+
+// main
+
+        ADDI    X19, XZR, #0          // a = 0 (base address)
+        ADDI    X20, XZR, #512        // n = 512  (try #8 first when testing)
+        ADDI    X21, XZR, #42         // seed = 42
+
+//  fill_array(a, n, seed)
+        ADD     X0, X19, XZR
+        ADD     X1, X20, XZR
+        ADD     X2, X21, XZR
+        BL      fill_array
+
+//  local_sort(a, n)
+        ADD     X0, X19, XZR
+        ADD     X1, X20, XZR
+        BL      local_sort
+
+//  for (i = 0; i < n; i++)
+        ADDI    X22, XZR, #0          // i = 0
+
+search_loop:
+        SUBS    XZR, X22, X20
+        B.GE    search_done
+
+        LSL     X23, X22, #3          // i * 8
+        ADD     X24, X19, X23
+        LDUR    X25, [X24, #0]        // a[i]
+
+        ADD     X0, X19, XZR
+        ADD     X1, X20, XZR
+        ADD     X2, X25, XZR
+        BL      binary_search
+
+        CBZ     X0, fail
+
+        ADDI    X22, X22, #1
+        B       search_loop
+
+search_done:
+
+//  a[0] - 1
+        LDUR    X25, [X19, #0]
+        SUBI    X2, X25, #1
+        ADD     X0, X19, XZR
+        ADD     X1, X20, XZR
+        BL      binary_search
+        CBNZ    X0, fail
+
+//  a[0] + 1  (NOTE: this value can legitimately exist in the array,
+//             check what the assignment expects here)
+        ADDI    X2, X25, #1
+        ADD     X0, X19, XZR
+        ADD     X1, X20, XZR
+        BL      binary_search
+        CBNZ    X0, fail
+
+//  a[n-1] + 1
+        SUBI    X23, X20, #1
+        LSL     X23, X23, #3
+        ADD     X24, X19, X23
+        LDUR    X25, [X24, #0]
+
+        ADDI    X2, X25, #1
+        ADD     X0, X19, XZR
+        ADD     X1, X20, XZR
+        BL      binary_search
+        CBNZ    X0, fail
+
+        HALT
+
+fail:
+        HALT
+
+
+
+// fill_array
+// X0 = a
+// X1 = n
+// X2 = seed
+// Leaf function: uses only X0-X7, so no stack frame needed.
+
+fill_array:
+        // build mask m = 0x7FFFFFFF
+        ADDI X5, XZR, #4095
+        LSL X5, X5, #12
+        ORRI X5, X5, #4095
+        LSL X5, X5, #7
+        ORRI X5, X5, #127
+
+        ADDI X3, XZR, #0              // i = 0
+loop:
+        SUBS XZR, X3, X1
+        B.GE done
+
+        // X4 = seed * 1103515245 (shift-and-add)
+        ADD X4, X2, XZR
+
+        LSL X6, X2, #2
+        ADD X4, X4, X6
+
+        LSL X6, X2, #3
+        ADD X4, X4, X6
+
+        LSL X6, X2, #5
+        ADD X4, X4, X6
+
+        LSL X6, X2, #6
+        ADD X4, X4, X6
+
+        LSL X6, X2, #9
+        ADD X4, X4, X6
+
+        LSL X6, X2, #10
+        ADD X4, X4, X6
+
+        LSL X6, X2, #11
+        ADD X4, X4, X6
+
+        LSL X6, X2, #14
+        ADD X4, X4, X6
+
+        LSL X6, X2, #17
+        ADD X4, X4, X6
+
+        LSL X6, X2, #18
+        ADD X4, X4, X6
+
+        LSL X6, X2, #22
+        ADD X4, X4, X6
+
+        LSL X6, X2, #23
+        ADD X4, X4, X6
+
+        LSL X6, X2, #24
+        ADD X4, X4, X6
+
+        LSL X6, X2, #30
+        ADD X4, X4, X6
+
+        // + 12345
+        ADDI X4, X4, #2047
+        ADDI X4, X4, #2047
+        ADDI X4, X4, #2047
+        ADDI X4, X4, #2047
+        ADDI X4, X4, #2047
+        ADDI X4, X4, #2047
+
+        ADDI X4, X4, #63
+
+        AND X2, X4, X5                // seed = (seed * 1103515245 + 12345) & m
+
+        LSL X6, X3, #3
+        ADD X7, X0, X6
+        STUR X2, [X7, #0]             // a[i] = seed
+
+        ADDI X3, X3, #1
+
+        B loop
+
+done:
+        BR X30
+
+
+// swap
+// X0 = a
+// X1 = idx1
+// X2 = idx2
+// Leaf function: no stack frame needed.
+
+swap:
+        // addr1
+        LSL X3, X1, #3
+        ADD X3, X0, X3
+
+        // addr2
+        LSL X4, X2, #3
+        ADD X4, X0, X4
+
+        // tmp = a[idx1]
+        LDUR X5, [X3, #0]
+
+        // a[idx1] = a[idx2]
+        LDUR X6, [X4, #0]
+        STUR X6, [X3, #0]
+
+        // a[idx2] = tmp
+        STUR X5, [X4, #0]
+
+        BR X30
+
+
+
+
+// is_locally_sorted
+// X0 = i
+// X1 = a
+// X2 = n
+// returns 1 or 0 in X0
+// Leaf function: no stack frame needed.
+
+is_locally_sorted:
+        // if (n <= 1)
+        SUBIS XZR, X2, #1
+        B.LE true
+
+        // if (i == 0)
+        CBZ X0, check_start
+
+        // if (i == n-1)
+        SUBI X3, X2, #1
+        SUBS XZR, X0, X3
+        B.EQ check_end
+
+        // middle case
+        // load a[i-1]
+        SUBI X3, X0, #1
+        LSL X3, X3, #3
+        ADD X3, X1, X3
+        LDUR X4, [X3, #0]
+
+        // load a[i]
+        LSL X5, X0, #3
+        ADD X5, X1, X5
+        LDUR X6, [X5, #0]
+
+        // load a[i+1]
+        ADDI X7, X0, #1
+        LSL X7, X7, #3
+        ADD X7, X1, X7
+        LDUR X8, [X7, #0]
+
+        // check a[i-1] <= a[i]
+        SUBS XZR, X4, X6
+        B.GT false
+
+        // check a[i] <= a[i+1]
+        SUBS XZR, X6, X8
+        B.GT false
+
+        B true
+
+check_start:
+        // a[0] <= a[1]
+        LDUR X4, [X1, #0]
+
+        ADDI X3, X1, #8
+        LDUR X5, [X3, #0]
+
+        SUBS XZR, X4, X5
+        B.GT false
+
+        B true
+
+check_end:
+        // a[n-2] <= a[n-1]
+        SUBI X3, X2, #2
+        LSL X3, X3, #3
+        ADD X3, X1, X3
+        LDUR X4, [X3, #0]
+
+        SUBI X5, X2, #1
+        LSL X5, X5, #3
+        ADD X5, X1, X5
+        LDUR X6, [X5, #0]
+
+        SUBS XZR, X4, X6
+        B.GT false
+
+        B true
+
+true:
+        ADDI X0, XZR, #1
+        B end
+
+false:
+        ADDI X0, XZR, #0
+
+end:
+        BR X30
+
+
+
+// local_sort
+// X0 = a
+// X1 = n
+// X19 = a, X20 = n, X21 = i, X22 = swapped flag
+
+local_sort:
+        // save registers
+        SUBI SP, SP, #48
+        STUR X30, [SP, #0]
+        STUR X19, [SP, #8]
+        STUR X20, [SP, #16]
+        STUR X21, [SP, #24]
+        STUR X22, [SP, #32]
+
+        ADD X19, X0, XZR        // a
+        ADD X20, X1, XZR        // n
+
+outer_loop:
+        ADDI X21, XZR, #0       // i = 0
+        ADDI X22, XZR, #1       // swapped = 1 (means: no swap happened yet)
+
+inner_loop:
+        SUBS XZR, X21, X20
+        B.GE check_swap
+
+        ADD X0, X21, XZR
+        ADD X1, X19, XZR
+        ADD X2, X20, XZR
+        BL is_locally_sorted
+
+        CBNZ X0, skip
+
+        CBZ X21, use_next
+
+        // compare a[i-1] and a[i]
+        SUBI X4, X21, #1
+        LSL X4, X4, #3
+        ADD X4, X19, X4
+        LDUR X5, [X4, #0]
+
+        LSL X6, X21, #3
+        ADD X6, X19, X6
+        LDUR X7, [X6, #0]
+
+        SUBS XZR, X5, X7
+        B.LE use_next
+
+        // swap(i-1, i)
+        ADD X0, X19, XZR
+        SUBI X1, X21, #1
+        ADD X2, X21, XZR
+        BL swap
+
+        ADDI X22, XZR, #0       // a swap happened
+
+        B skip
+
+use_next:
+        // swap(i, i+1)
+        ADD X0, X19, XZR
+        ADD X1, X21, XZR
+        ADDI X2, X21, #1
+        BL swap
+
+        ADDI X22, XZR, #0       // a swap happened
+
+skip:
+        ADDI X21, X21, #1
+        B inner_loop
+
+check_swap:
+        CBNZ X22, done_sort     // done if no swaps this pass
+        B outer_loop
+
+done_sort:
+        LDUR X30, [SP, #0]
+        LDUR X19, [SP, #8]
+        LDUR X20, [SP, #16]
+        LDUR X21, [SP, #24]
+        LDUR X22, [SP, #32]
+        ADDI SP, SP, #48
+        BR X30
+
+
+// binary_search
+// X0 = a
+// X1 = n
+// X2 = value
+// returns in X0 (1 = found, 0 = not found)
+
+binary_search:
+        // save registers
+        SUBI SP, SP, #32
+        STUR X30, [SP, #0]
+        STUR X19, [SP, #8]
+        STUR X20, [SP, #16]
+        STUR X21, [SP, #24]
+
+        ADD X19, X0, XZR      // a
+        ADD X20, X1, XZR      // n
+        ADD X21, X2, XZR      // value
+
+        CBZ X20, return_false // if n == 0
+
+        SUBIS XZR, X20, #1
+        B.NE recurse
+
+        // n == 1
+        LDUR X3, [X19, #0]
+        SUBS XZR, X3, X21
+        B.EQ return_true
+        B return_false
+
+recurse:
+        LSR X4, X20, #1       // mid = n / 2
+
+        // load a[mid]
+        LSL X5, X4, #3
+        ADD X5, X19, X5
+        LDUR X6, [X5, #0]
+
+        // if equal
+        SUBS XZR, X6, X21
+        B.EQ return_true
+
+        // if value > a[mid] --> right side, else left side
+        SUBS XZR, X21, X6
+        B.GT go_right
+
+        // LEFT: search a[0 .. mid-1]
+        ADD X0, X19, XZR
+        ADD X1, X4, XZR
+        ADD X2, X21, XZR
+        BL binary_search
+        B bs_done
+
+go_right:
+        // right side: a = a + mid + 1
+        ADDI X9, X4, #1
+        LSL X9, X9, #3
+        ADD X0, X19, X9
+
+        // n = n - mid - 1
+        SUB X1, X20, X4
+        SUBI X1, X1, #1
+
+        ADD X2, X21, XZR
+        BL binary_search
+        B bs_done
+
+return_true:
+        ADDI X0, XZR, #1
+        B bs_done
+
+return_false:
+        ADDI X0, XZR, #0
+
+bs_done:
+        LDUR X30, [SP, #0]
+        LDUR X19, [SP, #8]
+        LDUR X20, [SP, #16]
+        LDUR X21, [SP, #24]
+        ADDI SP, SP, #32
+        BR X30
